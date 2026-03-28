@@ -2,7 +2,7 @@
   "title": "Observability Demo",
   "uid": "observability-demo",
   "schemaVersion": 38,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "time": { "from": "now-15m", "to": "now" },
   "panels": [
@@ -21,19 +21,19 @@
     },
     {
       "id": 2,
-      "title": "Latency p95 — api.total",
+      "title": "Latency p50 / p95 — api.total",
       "type": "timeseries",
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(api_total_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "p95 latency"
+          "legendFormat": "p95"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.50, sum(rate(api_total_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "p50 latency"
+          "legendFormat": "p50"
         }
       ]
     },
@@ -52,35 +52,9 @@
     },
     {
       "id": 4,
-      "title": "External Call Latency p95",
-      "type": "timeseries",
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(external_call_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "external call p95"
-        }
-      ]
-    },
-    {
-      "id": 5,
-      "title": "Calculation Latency p95",
-      "type": "timeseries",
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(calculation_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "calculation p95"
-        }
-      ]
-    },
-    {
-      "id": 6,
       "title": "Traces — Search in Tempo",
       "type": "traces",
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
       "datasource": { "type": "tempo", "uid": "tempo" },
       "targets": [
         {
@@ -91,11 +65,11 @@
       ]
     },
     {
-      "id": 7,
-      "title": "Сравнение latency этапов — p50 / p95 / p99",
-      "description": "Сколько времени занимает каждый этап запроса: весь запрос, внешний вызов, вычисления",
+      "id": 5,
+      "title": "Latency p95 — все этапы",
+      "description": "p95 latency для каждого этапа: первый API, второй API, вычисления, отправка результата",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 10 },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -108,42 +82,37 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(api_total_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "api.total p50"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(api_total_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
           "legendFormat": "api.total p95"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(external_call_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "external.call p50"
+          "expr": "histogram_quantile(0.95, sum(rate(first_api_call_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
+          "legendFormat": "first.api.call p95"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(external_call_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "external.call p95"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(calculation_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
-          "legendFormat": "calculation p50"
+          "expr": "histogram_quantile(0.95, sum(rate(second_api_call_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
+          "legendFormat": "second.api.call p95"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(calculation_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
           "legendFormat": "calculation p95"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(send_result_seconds_bucket{application=\"observability-demo\"}[1m])) by (le))",
+          "legendFormat": "send.result p95"
         }
       ]
     },
     {
-      "id": 8,
+      "id": 6,
       "title": "Среднее время этапов (last 1m)",
       "description": "Среднее время выполнения каждого этапа за последнюю минуту",
       "type": "bargauge",
-      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 26, "w": 24, "h": 8 },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -151,8 +120,8 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.15 },
-              { "color": "red", "value": 0.25 }
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 1.0 }
             ]
           }
         }
@@ -166,17 +135,27 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "rate(api_total_seconds_sum{application=\"observability-demo\"}[1m]) / rate(api_total_seconds_count{application=\"observability-demo\"}[1m])",
-          "legendFormat": "api.total avg"
+          "legendFormat": "api.total"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(external_call_seconds_sum{application=\"observability-demo\"}[1m]) / rate(external_call_seconds_count{application=\"observability-demo\"}[1m])",
-          "legendFormat": "external.call avg"
+          "expr": "rate(first_api_call_seconds_sum{application=\"observability-demo\"}[1m]) / rate(first_api_call_seconds_count{application=\"observability-demo\"}[1m])",
+          "legendFormat": "first.api.call"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(second_api_call_seconds_sum{application=\"observability-demo\"}[1m]) / rate(second_api_call_seconds_count{application=\"observability-demo\"}[1m])",
+          "legendFormat": "second.api.call"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "rate(calculation_seconds_sum{application=\"observability-demo\"}[1m]) / rate(calculation_seconds_count{application=\"observability-demo\"}[1m])",
-          "legendFormat": "calculation avg"
+          "legendFormat": "calculation"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(send_result_seconds_sum{application=\"observability-demo\"}[1m]) / rate(send_result_seconds_count{application=\"observability-demo\"}[1m])",
+          "legendFormat": "send.result"
         }
       ]
     }

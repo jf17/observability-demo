@@ -48,17 +48,29 @@
 
 ## 📦 Функциональность
 
-Единственный endpoint `GET /api/test` выполняет три этапа:
+Единственный endpoint `GET /api/test` выполняет четыре последовательных этапа:
 
 ```
 GET /api/test
-  ├── 1. callExternalApi()   — эмуляция внешнего API, задержка 1200–1500 ms
-  └── 2. performCalculation() — эмуляция вычислений, задержка 50–150 ms
+  ├── 1. callFirstApi()    — эмуляция первого внешнего API,  задержка 1200–1500 ms
+  ├── 2. callSecondApi()   — эмуляция второго внешнего API,  задержка 800–1200 ms
+  ├── 3. performCalculation() — вычисление суммы и среднего из двух ответов, задержка 50–150 ms
+  └── 4. sendResult()      — отправка результата в третий API, задержка 300–600 ms
 ```
 
 Каждый этап имеет:
 - свой **Micrometer Timer** → метрика в Prometheus
 - свой **span** через `@Observed` → трейс в Tempo
+
+### Почему сервисы разбиты на отдельные бины?
+
+`@Observed` работает через Spring AOP proxy. Если вызывать методы внутри одного бина (self-invocation), proxy не перехватывает вызов и span не создаётся. Поэтому каждый логический слой вынесен в отдельный бин, вызываемый через интерфейс:
+
+| Интерфейс | Реализация | Назначение |
+|-----------|-----------|------------|
+| `BusinessService` | `DemoService` | Оркестратор — координирует все этапы |
+| `ExternalApiClientService` | `ExternalApiClient` | Вызовы первого, второго и третьего API |
+| `CalculationServiceApi` | `CalculationService` | Вычисления на основе двух ответов |
 
 ---
 
@@ -104,14 +116,29 @@ for i in $(seq 1 20); do curl -s http://localhost:8080/api/test; done
 {
   "timestamp": "2026-03-28T18:00:00Z",
   "status": "success",
-  "externalCall": {
-    "source": "external-api",
+  "firstApi": {
+    "source": "first-api",
+    "value": 73.4,
     "delayMs": 1380,
     "status": "ok"
   },
+  "secondApi": {
+    "source": "second-api",
+    "value": 45.1,
+    "delayMs": 1020,
+    "status": "ok"
+  },
   "calculation": {
-    "result": 42.7,
+    "v1": 73.4,
+    "v2": 45.1,
+    "sum": 118.5,
+    "avg": 59.25,
     "delayMs": 93,
+    "status": "ok"
+  },
+  "sendResult": {
+    "destination": "third-api",
+    "delayMs": 450,
     "status": "ok"
   }
 }
@@ -126,7 +153,6 @@ for i in $(seq 1 20); do curl -s http://localhost:8080/api/test; done
 | Интерфейс | URL | Что смотреть |
 |-----------|-----|-------------|
 | Actuator (метрики raw) | http://localhost:8080/actuator/prometheus | Сырые метрики Prometheus |
-| Actuator (конкретная метрика) | http://localhost:8080/actuator/metrics/api.total | COUNT, TOTAL, MAX |
 | Prometheus UI | http://localhost:9090 | Запросы PromQL, графики |
 | Grafana Dashboard | http://localhost:3000/d/observability-demo | RPS, latency, ошибки |
 | Grafana Explore → Tempo | http://localhost:3000/explore | Waterfall трейсов |
@@ -137,10 +163,11 @@ for i in $(seq 1 20); do curl -s http://localhost:8080/api/test; done
 
 Доступные панели:
 - **RPS** — запросов в секунду
-- **Latency p95** — 95-й перцентиль времени ответа
+- **Latency p50 / p95 — api.total** — перцентили полного времени ответа
 - **Errors** — количество 5xx ошибок
-- **Сравнение latency этапов** — `api.total` / `external.call` / `calculation` на одном графике
-- **Среднее время этапов** — bargauge с цветовыми порогами (🟢 < 150ms / 🟡 < 250ms / 🔴 > 250ms)
+- **Traces** — поиск трейсов в Tempo
+- **Latency p95 — все этапы** — сравнение `api.total`, `first.api.call`, `second.api.call`, `calculation`, `send.result` на одном графике
+- **Среднее время этапов** — bargauge с цветовыми порогами (🟢 < 500ms / 🟡 < 1000ms / 🔴 > 1000ms)
 
 ### Трейсы в Grafana Tempo
 
@@ -154,9 +181,11 @@ for i in $(seq 1 20); do curl -s http://localhost:8080/api/test; done
 
 Результат — waterfall диаграмма:
 ```
-http get /api/test     ████████████████████  ~1500ms
-  └─ external-call     ██████████████████    ~1380ms
-  └─ calculation              ████             ~93ms
+http get /api/test  [════════════════════════════════════] ~3400ms
+  first-api-call    [══════════════════]                   ~1380ms
+  second-api-call                      [════════════]      ~1000ms
+  calculation                                       [══]     ~93ms
+  send-result                                          [═══] ~450ms
 ```
 
 ### Полезные PromQL запросы
@@ -165,11 +194,20 @@ http get /api/test     ███████████████████
 # RPS
 rate(api_total_seconds_count[1m])
 
-# p95 latency всего запроса
+# p95 latency полного запроса
 histogram_quantile(0.95, sum(rate(api_total_seconds_bucket[1m])) by (le))
 
-# Среднее время external call
-rate(external_call_seconds_sum[1m]) / rate(external_call_seconds_count[1m])
+# Среднее время первого API
+rate(first_api_call_seconds_sum[1m]) / rate(first_api_call_seconds_count[1m])
+
+# Среднее время второго API
+rate(second_api_call_seconds_sum[1m]) / rate(second_api_call_seconds_count[1m])
+
+# Среднее время вычислений
+rate(calculation_seconds_sum[1m]) / rate(calculation_seconds_count[1m])
+
+# Среднее время отправки результата
+rate(send_result_seconds_sum[1m]) / rate(send_result_seconds_count[1m])
 
 # Ошибки 5xx
 rate(http_server_requests_seconds_count{status=~"5.."}[1m])
@@ -195,9 +233,14 @@ observability-demo/
 │   │   ├── controller/
 │   │   │   └── TestController.java         # GET /api/test, Timer.record()
 │   │   ├── service/
-│   │   │   └── DemoService.java            # @Observed, Timer, эмуляция задержек
+│   │   │   ├── BusinessService.java        # интерфейс оркестратора
+│   │   │   ├── DemoService.java            # реализация: координирует все этапы
+│   │   │   ├── ExternalApiClientService.java  # интерфейс внешних вызовов
+│   │   │   ├── ExternalApiClient.java      # реализация: first, second, send API
+│   │   │   ├── CalculationServiceApi.java  # интерфейс вычислений
+│   │   │   └── CalculationService.java     # реализация: sum + avg из двух ответов
 │   │   └── config/
-│   │       ├── ObservabilityConfig.java    # регистрация кастомных Timer-ов
+│   │       ├── ObservabilityConfig.java    # регистрация Timer-ов
 │   │       └── TracingConfig.java          # ObservedAspect для @Observed AOP
 │   └── resources/
 │       └── application.yml                 # метрики, трейсинг, OTLP endpoint
@@ -227,15 +270,10 @@ podman-compose -f infra/podman-compose.yml up -d
 # Остановить все
 podman-compose -f infra/podman-compose.yml down
 
-# Остановить по отдельности
-podman stop prometheus grafana tempo
-
-# Запустить по отдельности
-podman start prometheus grafana tempo
-
 # Логи контейнера
 podman logs grafana
 podman logs tempo
+podman logs prometheus
 ```
 
 ---
@@ -245,7 +283,9 @@ podman logs tempo
 | Метрика | Описание | Prometheus имя |
 |---------|----------|----------------|
 | `api.total` | Полное время обработки запроса | `api_total_seconds_*` |
-| `external.call` | Время вызова внешнего API | `external_call_seconds_*` |
-| `calculation` | Время вычислений | `calculation_seconds_*` |
+| `first.api.call` | Время вызова первого внешнего API | `first_api_call_seconds_*` |
+| `second.api.call` | Время вызова второго внешнего API | `second_api_call_seconds_*` |
+| `calculation` | Время вычислений (sum + avg) | `calculation_seconds_*` |
+| `send.result` | Время отправки результата в третий API | `send_result_seconds_*` |
 
 Все метрики публикуют гистограммы (`publishPercentileHistogram`) для расчёта p50/p95/p99.

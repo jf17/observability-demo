@@ -21,12 +21,16 @@ management:
     distribution:
       percentiles-histogram:
         api.total: true
-        external.call: true
+        first.api.call: true
+        second.api.call: true
         calculation: true
+        send.result: true
       percentiles:
         api.total: 0.5, 0.95, 0.99
-        external.call: 0.5, 0.95, 0.99
+        first.api.call: 0.5, 0.95, 0.99
+        second.api.call: 0.5, 0.95, 0.99
         calculation: 0.5, 0.95, 0.99
+        send.result: 0.5, 0.95, 0.99
   tracing:
     sampling:
       probability: 1.0
