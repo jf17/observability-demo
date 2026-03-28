@@ -15,9 +15,11 @@ import org.springframework.context.annotation.Configuration;
  *
  * Пример одного трейса:
  *   traceId: abc123
- *   ├── span: "http get /api/test"     (root span, 1500ms)
- *   │   ├── span: "external-call"      (дочерний span, 1380ms)
- *   │   └── span: "calculation"        (дочерний span, 93ms)
+ *   ├── span: "http get /api/test"   (root span, ~3400ms)
+ *   │   ├── span: "first-api-call"   (дочерний span, ~1380ms)
+ *   │   ├── span: "second-api-call"  (дочерний span, ~1000ms)
+ *   │   ├── span: "calculation"      (дочерний span, ~93ms)
+ *   │   └── span: "send-result"      (дочерний span, ~450ms)
  *
  * Это позволяет в Grafana Tempo увидеть waterfall-диаграмму и сразу понять,
  * где именно теряется время.
@@ -28,22 +30,32 @@ import org.springframework.context.annotation.Configuration;
  * AOP — это механизм, который "оборачивает" вызов метода дополнительной логикой
  * (в нашем случае — созданием span-а) без изменения самого метода.
  *
- * КАК ЭТО РАБОТАЕТ?
- * 1. Spring видит @Observed на методе
- * 2. ObservedAspect перехватывает вызов (через AOP proxy)
- * 3. Перед вызовом создаётся новый span, дочерний к текущему
- * 4. После вызова span закрывается с временем выполнения
- * 5. Span отправляется в Tempo через OTLP
+ * КАК ЭТО РАБОТАЕТ ТЕХНИЧЕСКИ?
+ * 1. Spring видит @Observed на методе бина
+ * 2. ObservedAspect перехватывает вызов (через JDK dynamic proxy или CGLIB proxy)
+ * 3. Перед вызовом создаётся новый Observation (span), дочерний к текущему активному
+ * 4. После вызова Observation закрывается — span отправляется в Tempo через OTLP
  *
- * БЕЗ ЭТОГО БИНА @Observed работать не будет — span-ы не создадутся.
+ * БЕЗ ЭТОГО БИНА @Observed работать не будет — span-ы не создадутся,
+ * и в Tempo будет виден только root span "http get /api/test".
+ *
+ * ПОЧЕМУ НУЖЕН spring-boot-starter-aop В build.gradle?
+ * ObservedAspect использует AspectJ для перехвата вызовов методов.
+ * Без зависимости spring-boot-starter-aop аспект не будет применён.
  */
 @Configuration
 public class TracingConfig {
 
     /**
-     * ObservedAspect — это AOP-аспект, который обрабатывает аннотацию @Observed.
-     * ObservationRegistry — центральный реестр наблюдений Micrometer,
-     * через который создаются span-ы и метрики.
+     * ObservedAspect — AOP-аспект, который обрабатывает аннотацию @Observed.
+     *
+     * ObservationRegistry — центральный реестр наблюдений Micrometer.
+     * Через него создаются Observation-объекты, которые одновременно:
+     * - создают span для трейсинга (→ Tempo)
+     * - записывают метрику (→ Prometheus)
+     *
+     * Spring Boot автоматически создаёт и настраивает ObservationRegistry —
+     * нам нужно только передать его в ObservedAspect.
      */
     @Bean
     public ObservedAspect observedAspect(ObservationRegistry observationRegistry) {
