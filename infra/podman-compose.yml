@@ -1,0 +1,51 @@
+version: "3.8"
+
+# Запуск: podman-compose -f infra/podman-compose.yml up -d
+# Остановка: podman-compose -f infra/podman-compose.yml down
+
+services:
+
+  prometheus:
+    image: docker.io/prom/prometheus:v2.51.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    extra_hosts:
+      # Позволяет Prometheus достучаться до Spring Boot на хосте
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+
+  tempo:
+    image: docker.io/grafana/tempo:2.4.1
+    container_name: tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+    command:
+      - "-config.file=/etc/tempo/tempo.yml"
+    restart: unless-stopped
+
+  grafana:
+    image: docker.io/grafana/grafana:10.4.1
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+      - tempo
+    restart: unless-stopped

@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: observability-demo
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, metrics
+  endpoint:
+    prometheus:
+      enabled: true
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        api.total: true
+        external.call: true
+        calculation: true
+      percentiles:
+        api.total: 0.5, 0.95, 0.99
+        external.call: 0.5, 0.95, 0.99
+        calculation: 0.5, 0.95, 0.99
+  tracing:
+    sampling:
+      probability: 1.0
+    enabled: true
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+      export:
+        step: 5s
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [traceId=%X{traceId} spanId=%X{spanId}] %logger{36} - %msg%n"
+  level:
+    root: INFO
+    com.demo.observability: DEBUG
+    io.micrometer.tracing: DEBUG
+    io.opentelemetry: DEBUG
